@@ -25,3 +25,41 @@
  .nav-link{font-size:12px;color:#607780}.nav-link.active{color:#086f5e}.stat-top{font-size:11px}.stat-detail{font-size:10px}.page-header p{font-size:12px}.panel-header p{font-size:11px}.filter-hint{font-size:10px}.data-table th{font-size:10px}.data-table td{font-size:12px;color:#526c79}.person-cell strong{font-size:12px;color:#405b69}.person-cell small{font-size:10px}.field small{font-size:11px}.report-table th{font-size:9px}.report-table td{font-size:10px}.report-table td.number{font-size:11px}.report-summary span{font-size:10px}.report-detail-totals{font-size:10px}.notes-cell>span{font-size:9px}.report-footnote{font-size:10px}.badge-active,.badge-working,.badge-approved,.badge-closed{color:#24684f}.badge-completed{color:#38618c}.badge-on_break{color:#755593}.badge-incomplete,.badge-pending,.badge-open{color:#806124}.badge-blocked,.badge-terminated,.badge-absent,.badge-rejected{color:#a05242}.badge-not_started,.badge-off,.badge-outside_employment,.badge-day_off{color:#657681}.timeline strong{color:#547462}.timeline time{color:#356d53}.employee-schedule>strong{color:#496b56}.day-total>strong{color:#386449}.punch-progress>div small{color:#6b7f75}.clock-date{font-size:12px}.clock-sync{font-size:10px}.punch-footnote{font-size:10px}.month-invite p,.dashboard-tip p{font-size:11px}.report-table .row-muted td{color:#74868d}.auth-footer,.dev-label{font-size:10px}.auth-footer{color:#77858b}
 }
 @media screen and (max-width:760px){.field input,.field select,.field textarea,.password-input input{font-size:16px!important;min-height:46px}.btn{min-height:43px}.page-header p{font-size:12px}.filter-bar .field-label{font-size:11px}.stat-top{font-size:11px}.stat-detail{font-size:10px}.person-cell strong{font-size:12px}.person-cell small{font-size:10px}.data-table td{font-size:12px}.report-table th{font-size:9px}.report-table td{font-size:10px}.report-summary span{font-size:9px}.punch-button strong{font-size:12px}.punch-button small{font-size:9px}.summary-line{font-size:12px}.timeline strong{font-size:12px}.timeline small{font-size:10px}.week-bar>span{font-size:10px}.week-bar small{font-size:10px}.topbar .environment-chip{font-size:6px}.help-item p{font-size:13px}}
+
+/* JORNADA - TEMA VERMELHO BORDÔ #800000 */
+
+:root {
+  --green: #800000;
+  --green-light: #f8eaea;
+}
+
+/* Botões principais e logotipo */
+.btn-primary,
+.brand-mark {
+  background-color: #800000;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: #650000;
+}
+
+/* Links, textos e navegação */
+.btn-text,
+.text-link,
+.nav-link.active {
+  color: #800000;
+}
+
+/* Caixas de seleção */
+.checkbox-field input {
+  accent-color: #800000;
+}
+
+/* Campos de formulário selecionados */
+.field input:focus,
+.field textarea:focus,
+.field select:focus,
+.password-input input:focus {
+  border-color: #800000;
+  box-shadow: 0 0 0 3px #80000018;
+}
