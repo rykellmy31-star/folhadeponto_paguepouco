@@ -128,6 +128,22 @@ adminEmployees.post('/schedules/:id/replace',async c=>{
   return c.json({id,assigned_employees:employees.length,message:`Nova versão criada e atribuída automaticamente a ${employees.length} funcionário(s) a partir de ${input.effective_from}.`},201);
 });
 
+// Exclusão definitiva permitida apenas para jornadas nunca atribuídas.
+adminEmployees.delete('/schedules/:id',async c=>{
+  requireRecent(c);
+  const id=parse(uuid,c.req.param('id'));
+  const db=c.get('db');
+  const existing=await db.prepare('SELECT id,name FROM schedules WHERE id=?').bind(id).first<{id:string;name:string}>();
+  ensure(existing,404,'schedule_not_found','Escala não encontrada.');
+  const assigned=await db.prepare('SELECT 1 AS used FROM schedule_assignments WHERE schedule_id=? LIMIT 1').bind(id).first();
+  ensure(!assigned,409,'schedule_in_use','Esta escala já foi atribuída a um funcionário e não pode ser excluída, pois faz parte do histórico do ponto.');
+  await db.batch([
+    db.prepare('DELETE FROM schedules WHERE id=? AND NOT EXISTS (SELECT 1 FROM schedule_assignments WHERE schedule_id=?)').bind(id,id),
+    auditStatement(c,'schedule.deleted','schedule',id,{name:existing.name}),
+  ]);
+  return c.json({message:'Escala excluída com auditoria.'});
+});
+
 adminEmployees.get('/users',async c=>{
   const rows=await c.get('db').prepare('SELECT id,login,email,display_name,active,created_at FROM users WHERE role=\'admin\' ORDER BY display_name').all();return c.json(rows.results);
 });
