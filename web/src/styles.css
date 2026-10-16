@@ -63,3 +63,47 @@
   border-color: #800000;
   box-shadow: 0 0 0 3px #80000018;
 }
+
+/* JORNADA - PERSONALIZAÇÃO BORDÔ */
+
+:root {
+  --green: #800000;
+  --green-light: #f8eaea;
+  --green-dark: #650000;
+}
+
+/* Painel lateral */
+.auth-hero {
+  background: linear-gradient(
+    145deg,
+    #301014 0%,
+    #210b0e 100%
+  );
+}
+
+/* Logotipo e elementos decorativos */
+.brand-mark {
+  background: #800000 !important;
+}
+
+/* Destaques e indicadores verdes */
+.auth-hero .accent,
+.auth-hero .dot,
+.auth-hero .orb {
+  color: #b95763;
+  border-color: #b95763;
+}
+
+/* Links e textos de destaque */
+a:hover {
+  color: #800000;
+}
+
+/* Botões principais */
+.btn-primary {
+  background: #800000 !important;
+}
+
+.btn-primary:hover {
+  background: #650000 !important;
+}
