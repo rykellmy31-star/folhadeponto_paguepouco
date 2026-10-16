@@ -80,6 +80,54 @@ adminEmployees.post('/schedules',async c=>{
     auditStatement(c,'schedule.created','schedule',id,{name:input.name,config:input.config}),
   ]);return c.json({id,message:'Jornada criada. Para alterar uma jornada em uso, crie outra versão e atribua uma nova vigência.'},201);
 });
+// Atualização versionada: nunca altera a configuração de uma escala histórica.
+adminEmployees.post('/schedules/:id/replace',async c=>{
+  requireRecent(c);
+  const oldId=parse(uuid,c.req.param('id'));
+  const input=await body(c,z.object({
+    name:z.string().trim().min(2).max(100),
+    config:scheduleSchema,
+    effective_from:date,
+  }).strict());
+  const db=c.get('db');
+  const settings=await db.prepare('SELECT timezone FROM settings WHERE id=1').first<{timezone:string}>();
+  const today=localDate(Date.now(),settings!.timezone);
+  ensure(input.effective_from>today,422,'invalid_effective_date','Escolha uma data futura para preservar expedientes já iniciados.');
+  const original=await db.prepare('SELECT id FROM schedules WHERE id=?').bind(oldId).first();
+  ensure(original,404,'schedule_not_found','Escala original não encontrada.');
+  // Encontra a escala vigente de cada funcionário na data escolhida.
+  const current=await db.prepare(`
+    SELECT e.id employee_id
+    FROM employees e
+    JOIN schedule_assignments a ON a.id=(
+      SELECT x.id FROM schedule_assignments x
+      WHERE x.employee_id=e.id AND x.effective_from<=?
+      ORDER BY x.effective_from DESC,x.created_at DESC LIMIT 1
+    )
+    WHERE e.status='active' AND a.schedule_id=?
+  `).bind(input.effective_from,oldId).all<{employee_id:string}>();
+  const employees=current.results;
+  // Evita duas atribuições na mesma data e resultados ambíguos.
+  for(const employee of employees){
+    const conflict=await db.prepare('SELECT id FROM schedule_assignments WHERE employee_id=? AND effective_from=?')
+      .bind(employee.employee_id,input.effective_from).first();
+    ensure(!conflict,409,'schedule_date_conflict','Um funcionário já tem uma alteração de escala nesta data. Escolha outra data ou revise o perfil dele.');
+  }
+  const id=crypto.randomUUID(),now=Date.now();
+  const statements=[
+    db.prepare('INSERT INTO schedules(id,name,config_json,created_by,created_at) VALUES(?,?,?,?,?)')
+      .bind(id,input.name,JSON.stringify(input.config),c.get('principal').id,now),
+    ...employees.map(employee=>db.prepare('INSERT INTO schedule_assignments(id,employee_id,schedule_id,effective_from,created_at) VALUES(?,?,?,?,?)')
+      .bind(crypto.randomUUID(),employee.employee_id,id,input.effective_from,now)),
+    auditStatement(c,'schedule.replaced','schedule',id,{
+      previous_schedule_id:oldId,effective_from:input.effective_from,
+      assigned_employees:employees.length,name:input.name,config:input.config,
+    }),
+  ];
+  await db.batch(statements);
+  return c.json({id,assigned_employees:employees.length,message:`Nova versão criada e atribuída automaticamente a ${employees.length} funcionário(s) a partir de ${input.effective_from}.`},201);
+});
+
 adminEmployees.get('/users',async c=>{
   const rows=await c.get('db').prepare('SELECT id,login,email,display_name,active,created_at FROM users WHERE role=\'admin\' ORDER BY display_name').all();return c.json(rows.results);
 });
