@@ -107,3 +107,93 @@ a:hover {
 .btn-primary:hover {
   background: #650000 !important;
 }
+
+/* FARMÁCIA PAGUE POUCO - IDENTIDADE VISUAL */
+
+:root {
+  --green: #800000;
+  --green-light: #f8eeee;
+}
+
+/* Fundo branco na lateral do login */
+.auth-story {
+  background: #ffffff !important;
+  color: #800000 !important;
+}
+
+/* Remove o efeito verde do fundo */
+.auth-story::after {
+  display: none !important;
+}
+
+/* Títulos e textos em bordô */
+.auth-story h1,
+.auth-story h1 > span,
+.auth-story-content > p,
+.auth-kicker,
+.auth-story-footer {
+  color: #800000 !important;
+}
+
+/* Detalhes decorativos */
+.auth-kicker > span,
+.auth-story .art-dot {
+  background: #800000 !important;
+}
+
+.auth-story .orbit {
+  border-color: #ead0d0 !important;
+}
+
+/* Relógio decorativo */
+.auth-story .art-clock {
+  background: #f8eeee !important;
+  border-color: #ead0d0 !important;
+  color: #800000 !important;
+}
+
+/* Etiquetas decorativas */
+.auth-story .art-label {
+  background: #f8eeee !important;
+  border-color: #ead0d0 !important;
+  color: #800000 !important;
+}
+
+/* Botões principais */
+.btn-primary,
+.punch-enabled {
+  background: #800000 !important;
+  border-color: #800000 !important;
+  color: #ffffff !important;
+}
+
+.btn-primary:hover:not(:disabled),
+.punch-enabled:hover {
+  background: #650000 !important;
+}
+
+/* Links e elementos selecionados */
+.btn-text,
+.text-link,
+.nav-link.active,
+.password-heading a,
+.auth-switch a {
+  color: #800000 !important;
+}
+
+.nav-link.active {
+  background: #f8eeee !important;
+}
+
+/* Campos selecionados */
+.checkbox-field input {
+  accent-color: #800000;
+}
+
+.field input:focus,
+.field textarea:focus,
+.field select:focus,
+.password-input input:focus {
+  border-color: #800000 !important;
+  box-shadow: 0 0 0 3px #80000018 !important;
+}
