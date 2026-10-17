@@ -67,7 +67,7 @@ adminEmployees.post('/employees', async c => {
   const userId=crypto.randomUUID();
 
   const exists=await db.prepare(
-    'SELECT id FROM schedules WHERE id=? AND archived=0'
+    'SELECT id FROM schedules WHERE id=? AND archived=0 AND deleted_at IS NULL'
   ).bind(input.schedule_id).first();
 
   ensure(
@@ -364,7 +364,7 @@ adminEmployees.post('/employees/:id/schedule',async c=>{
   ).bind(id).first();
 
   const schedule=await db.prepare(
-    'SELECT id FROM schedules WHERE id=? AND archived=0'
+    'SELECT id FROM schedules WHERE id=? AND archived=0 AND deleted_at IS NULL'
   ).bind(input.schedule_id).first();
 
   ensure(
@@ -498,7 +498,7 @@ adminEmployees.post(
 
 adminEmployees.get('/schedules',async c=>{
   const rows=await c.get('db').prepare(
-    'SELECT * FROM schedules ORDER BY created_at DESC'
+    'SELECT * FROM schedules WHERE deleted_at IS NULL ORDER BY created_at DESC'
   ).all<any>();
 
   return c.json(rows.results.map(v=>{
@@ -565,7 +565,7 @@ adminEmployees.patch('/schedules/:id', async c => {
 
   const db = c.get('db');
   const current = await db.prepare(`
-    SELECT id, name, config_json, archived
+    SELECT id, name, config_json, archived, deleted_at
     FROM schedules
     WHERE id = ?
   `).bind(id).first<{
@@ -573,11 +573,16 @@ adminEmployees.patch('/schedules/:id', async c => {
     name: string;
     config_json: string;
     archived: number;
+    deleted_at: number | null;
   }>();
 
   ensure(
     current, 404, 'schedule_not_found',
     'Jornada nao encontrada.'
+  );
+  ensure(
+    current.deleted_at === null, 404, 'schedule_not_found',
+    'Jornada excluida nao pode ser editada.'
   );
   ensure(
     !current.archived, 409, 'schedule_archived',
@@ -673,15 +678,22 @@ adminEmployees.post('/schedules/:id/replace',async c=>{
   );
 
   const original=await db.prepare(
-    'SELECT id,archived FROM schedules WHERE id=?'
+    'SELECT id,archived,deleted_at FROM schedules WHERE id=?'
   ).bind(oldId).first<{
     id:string;
     archived:number;
+    deleted_at:number|null;
   }>();
 
   ensure(
     original,404,'schedule_not_found',
     'Escala original não encontrada.'
+  );
+
+  ensure(
+    original.deleted_at === null,
+    404,'schedule_not_found',
+    'Jornada excluida nao pode ser substituida.'
   );
 
   ensure(
@@ -786,16 +798,21 @@ adminEmployees.patch('/schedules/:id/archive',async c=>{
   const db=c.get('db');
 
   const schedule=await db.prepare(
-    'SELECT id,name,archived FROM schedules WHERE id=?'
+    'SELECT id,name,archived,deleted_at FROM schedules WHERE id=?'
   ).bind(id).first<{
     id:string;
     name:string;
     archived:number;
+    deleted_at:number|null;
   }>();
 
   ensure(
     schedule,404,'schedule_not_found',
     'Escala não encontrada.'
+  );
+  ensure(
+    schedule.deleted_at === null,404,'schedule_not_found',
+    'Jornada excluida nao pode ser arquivada ou restaurada.'
   );
 
   if(input.archived){
@@ -874,15 +891,17 @@ adminEmployees.delete('/schedules/:id',async c=>{
   const db=c.get('db');
 
   const existing=await db.prepare(
-    'SELECT id,name FROM schedules WHERE id=?'
+    'SELECT id,name,deleted_at FROM schedules WHERE id=?'
   ).bind(id).first<{
     id:string;
     name:string;
+    deleted_at:number|null;
   }>();
 
   ensure(
-    existing,404,'schedule_not_found',
-    'Escala não encontrada.'
+    existing && existing.deleted_at === null,
+    404,'schedule_not_found',
+    'Jornada nao encontrada ou ja excluida.'
   );
 
   const assigned=await db.prepare(`
@@ -895,27 +914,32 @@ adminEmployees.delete('/schedules/:id',async c=>{
   ensure(
     !assigned,
     409,'schedule_in_use',
-    'Esta escala já foi atribuída a um funcionário e não pode ser excluída, pois faz parte do histórico do ponto.'
+    'Esta jornada ja foi atribuida a um funcionario e nao pode ser excluida, pois faz parte do historico.'
   );
 
+  // Exclusao logica: nunca apaga o historico nem a linha de schedules.
+  // O gatilho do banco rejeita a exclusao se houver atribuicoes.
+  const now=Date.now();
   await db.batch([
     db.prepare(`
-      DELETE FROM schedules
+      UPDATE schedules
+      SET deleted_at=?, archived=1
       WHERE id=?
+        AND deleted_at IS NULL
         AND NOT EXISTS(
           SELECT 1 FROM schedule_assignments
           WHERE schedule_id=?
         )
-    `).bind(id,id),
+    `).bind(now,id,id),
 
     auditStatement(
       c,'schedule.deleted','schedule',id,
-      {name:existing.name}
+      {name:existing.name,deleted_at:now,mode:'soft_delete'}
     )
   ]);
 
   return c.json({
-    message:'Escala excluída com auditoria.'
+    message:'Jornada removida do painel. Historico preservado.'
   });
 });
 
