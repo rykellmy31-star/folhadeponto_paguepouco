@@ -14,15 +14,24 @@ const settings=(c:Ctx)=>c.get('db').prepare('SELECT * FROM settings WHERE id=1')
 adminOperations.get('/dashboard',async c=>{
   const config=await settings(c),selectedDate=parse(date,c.req.query('date')||localDate(Date.now(),config!.timezone));
   const selectedMonth=parse(month,c.req.query('month')||selectedDate.slice(0,7));
-  // Funcionarios arquivados (incluindo contas de demonstracao) nao
-  // entram nos indicadores do painel. Seus pontos e relatórios historicos
-  // continuam preservados no banco para auditoria.
-  const archived=await c.get('db').prepare(
-    'SELECT id FROM employees WHERE deleted_at IS NOT NULL'
-  ).all<{id:string}>();
-  const archivedIds=new Set(archived.results.map(e=>e.id));
+  // Contas de demonstracao arquivadas nao devem inflar os indicadores.
+  // Ex-funcionarios reais continuam incluidos nos totais historicos.
+  // Os registros individuais permanecem preservados nos relatorios.
+  const demos=await c.get('db').prepare(`
+    SELECT DISTINCT e.id
+    FROM employees e
+    LEFT JOIN users u ON u.employee_id=e.id AND u.role='employee'
+    WHERE e.deleted_at IS NOT NULL
+      AND (
+        LOWER(e.full_name) LIKE '%demonstra%'
+        OR LOWER(e.full_name) LIKE '%funcionario teste%'
+        OR LOWER(e.registration) LIKE '%demo%'
+        OR LOWER(u.login) LIKE '%demo%'
+      )
+  `).all<{id:string}>();
+  const demoIds=new Set(demos.results.map(e=>e.id));
   const visibleReports=(items:Awaited<ReturnType<typeof reportsForMonth>>)=>
-    items.filter(r=>!archivedIds.has(r.employee.id));
+    items.filter(r=>!demoIds.has(r.employee.id));
   const reports=visibleReports(await reportsForMonth(c,selectedMonth));
   const dateReports=selectedDate.slice(0,7)===selectedMonth
     ?reports
