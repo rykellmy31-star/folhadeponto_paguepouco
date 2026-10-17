@@ -14,7 +14,7 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "jornada-db",
+      "database_name": "pontopaguepouco",
       "database_id": "ef8d42a5-b0b1-416d-abd0-e7947cef5cbc",
       "migrations_dir": "migrations"
     }
