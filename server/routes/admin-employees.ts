@@ -373,17 +373,18 @@ adminEmployees.post('/employees/:id/schedule',async c=>{
     'Funcionário ou jornada não encontrado.'
   );
 
-  // A restrição UNIQUE do banco também protege datas
-  // que tiveram uma atribuição cancelada.
+  // Considera conflito apenas quando ja existe atribuicao ativa.
+  // A atribuicao cancelada permanece no historico.
   const conflict=await db.prepare(`
-    SELECT id FROM schedule_assignments
-    WHERE employee_id=? AND effective_from=?
+    SELECT a.id FROM schedule_assignments a
+    WHERE a.employee_id=? AND a.effective_from=?
+      AND ${notCancelled('a')}
     LIMIT 1
   `).bind(id,input.effective_from).first();
 
   ensure(
     !conflict,409,'schedule_date_conflict',
-    'Esta data já possui ou já possuiu uma atribuição. Escolha outra data.'
+    'Este funcionario ja possui uma jornada ativa nesta data.'
   );
 
   await db.batch([
@@ -711,9 +712,10 @@ adminEmployees.post('/schedules/:id/replace',async c=>{
 
   for(const employee of employees){
     const conflict=await db.prepare(`
-      SELECT id FROM schedule_assignments
-      WHERE employee_id=?
-        AND effective_from=?
+      SELECT a.id FROM schedule_assignments a
+      WHERE a.employee_id=?
+        AND a.effective_from=?
+        AND ${notCancelled('a')}
       LIMIT 1
     `).bind(
       employee.employee_id,input.effective_from
@@ -722,7 +724,7 @@ adminEmployees.post('/schedules/:id/replace',async c=>{
     ensure(
       !conflict,
       409,'schedule_date_conflict',
-      'Um funcionário já possui ou já possuiu uma atribuição nesta data. Escolha outra data.'
+      'Este funcionario ja possui uma jornada ativa nesta data.'
     );
   }
 
