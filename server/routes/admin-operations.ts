@@ -36,7 +36,21 @@ adminOperations.get('/dashboard',async c=>{
 });
 adminOperations.get('/records',async c=>{
   const d=parse(date,c.req.query('date')),id=c.req.query('employee_id')?parse(uuid,c.req.query('employee_id')):undefined;
-  const reports=await reportsForMonth(c,d.slice(0,7),id);return c.json(reports.map(r=>({employee:r.employee,day:r.days.find(day=>day.date===d),closure:r.closure})));
+  // Oculta da tela operacional os funcionarios arquivados, mesmo quando
+  // existem marcacoes antigas ou um filtro de funcionario salvo na URL.
+  // Os pontos, ajustes, fechamentos e PDFs historicos seguem preservados.
+  const archived=await c.get('db').prepare(
+    'SELECT id FROM employees WHERE deleted_at IS NOT NULL'
+  ).all<{id:string}>();
+  const archivedIds=new Set(archived.results.map(e=>e.id));
+  // Se a URL solicitar explicitamente um funcionario arquivado, nao mostra dados.
+  if(id&&archivedIds.has(id))return c.json([]);
+  const reports=await reportsForMonth(c,d.slice(0,7),id);
+  return c.json(reports.filter(r=>!archivedIds.has(r.employee.id)).map(r=>({
+    employee:r.employee,
+    day:r.days.find(day=>day.date===d),
+    closure:r.closure
+  })));
 });
 adminOperations.get('/reports',async c=>{
   const m=parse(month,c.req.query('month'));const reports=await reportsForMonth(c,m);return c.json(reports.map(({employee,totals,closure})=>({employee,totals,closure,month:m})));
