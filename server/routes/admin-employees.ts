@@ -44,6 +44,7 @@ adminEmployees.get('/employees', async c => {
       ) schedule_name
     FROM employees e
     JOIN users u ON u.employee_id=e.id
+    WHERE e.deleted_at IS NULL
     ORDER BY e.full_name
   `).bind(today).all<any>();
 
@@ -157,7 +158,7 @@ adminEmployees.get('/employees/:id',async c=>{
            u.must_change_password
     FROM employees e
     JOIN users u ON u.employee_id=e.id
-    WHERE e.id=?
+    WHERE e.id=? AND e.deleted_at IS NULL
   `).bind(id).first<any>();
 
   ensure(
@@ -212,7 +213,7 @@ adminEmployees.put('/employees/:id',async c=>{
     SELECT e.*,u.id user_id,u.login,u.email
     FROM employees e
     JOIN users u ON u.employee_id=e.id
-    WHERE e.id=?
+    WHERE e.id=? AND e.deleted_at IS NULL
   `).bind(id).first<any>();
 
   ensure(
@@ -333,6 +334,77 @@ adminEmployees.put('/employees/:id',async c=>{
   return c.json({message:'Cadastro atualizado.'});
 });
 
+
+// Remocao administrativa segura. O funcionario deixa a lista e perde acesso,
+// mas marcacoes, historico, atribuicoes e auditoria sao preservados.
+adminEmployees.delete('/employees/:id', async c => {
+  requireRecent(c);
+  const id = parse(uuid, c.req.param('id'));
+  await body(c, z.object({confirmation:z.literal('EXCLUIR')}).strict());
+
+  const db = c.get('db');
+  const employee = await db.prepare(`
+    SELECT e.id,e.full_name,e.registration,e.status,
+           e.admission_date,e.employment_end,
+           u.id AS user_id
+    FROM employees e
+    JOIN users u ON u.employee_id=e.id AND u.role='employee'
+    WHERE e.id=? AND e.deleted_at IS NULL
+  `).bind(id).first<{
+    id:string;
+    full_name:string;
+    registration:string;
+    status:string;
+    admission_date:string;
+    employment_end:string|null;
+    user_id:string;
+  }>();
+
+  ensure(employee,404,'employee_not_found',
+    'Funcionario nao encontrado ou ja excluido.');
+
+  const settings = await db.prepare(
+    'SELECT timezone FROM settings WHERE id=1'
+  ).first<{timezone:string}>();
+  ensure(settings,503,'settings_unavailable','Configuracoes indisponiveis.');
+
+  const now = Date.now();
+  const today = localDate(now, settings.timezone);
+  const employmentEnd = employee.employment_end ??
+    (employee.admission_date > today ? employee.admission_date : today);
+
+  await db.batch([
+    db.prepare(`
+      UPDATE employees
+      SET status='terminated',employment_end=?,
+          deleted_at=?,deleted_by=?,updated_at=?
+      WHERE id=? AND deleted_at IS NULL
+    `).bind(employmentEnd,now,c.get('principal').id,now,id),
+
+    db.prepare(`
+      UPDATE users SET active=0,updated_at=? WHERE id=?
+    `).bind(now,employee.user_id),
+
+    db.prepare('DELETE FROM sessions WHERE user_id=?')
+      .bind(employee.user_id),
+
+    db.prepare('DELETE FROM password_reset_tokens WHERE user_id=?')
+      .bind(employee.user_id),
+
+    auditStatement(c,'employee.deleted','employee',id,{
+      full_name:employee.full_name,
+      registration:employee.registration,
+      previous_status:employee.status,
+      archived_at:now,
+      history_preserved:true
+    })
+  ]);
+
+  return c.json({
+    message:'Funcionario excluido da lista. Acesso bloqueado e historico preservado.'
+  });
+});
+
 adminEmployees.post('/employees/:id/schedule',async c=>{
   requireRecent(c);
 
@@ -360,7 +432,7 @@ adminEmployees.post('/employees/:id/schedule',async c=>{
   );
 
   const employee=await db.prepare(
-    'SELECT id FROM employees WHERE id=?'
+    'SELECT id FROM employees WHERE id=? AND deleted_at IS NULL'
   ).bind(id).first();
 
   const schedule=await db.prepare(
