@@ -14,8 +14,19 @@ const settings=(c:Ctx)=>c.get('db').prepare('SELECT * FROM settings WHERE id=1')
 adminOperations.get('/dashboard',async c=>{
   const config=await settings(c),selectedDate=parse(date,c.req.query('date')||localDate(Date.now(),config!.timezone));
   const selectedMonth=parse(month,c.req.query('month')||selectedDate.slice(0,7));
-  const reports=await reportsForMonth(c,selectedMonth);
-  const dateReports=selectedDate.slice(0,7)===selectedMonth?reports:await reportsForMonth(c,selectedDate.slice(0,7));
+  // Funcionarios arquivados (incluindo contas de demonstracao) nao
+  // entram nos indicadores do painel. Seus pontos e relatórios historicos
+  // continuam preservados no banco para auditoria.
+  const archived=await c.get('db').prepare(
+    'SELECT id FROM employees WHERE deleted_at IS NOT NULL'
+  ).all<{id:string}>();
+  const archivedIds=new Set(archived.results.map(e=>e.id));
+  const visibleReports=(items:Awaited<ReturnType<typeof reportsForMonth>>)=>
+    items.filter(r=>!archivedIds.has(r.employee.id));
+  const reports=visibleReports(await reportsForMonth(c,selectedMonth));
+  const dateReports=selectedDate.slice(0,7)===selectedMonth
+    ?reports
+    :visibleReports(await reportsForMonth(c,selectedDate.slice(0,7)));
   const rows=dateReports.map(r=>({employee:r.employee,day:r.days.find(d=>d.date===selectedDate)}));
   const active=rows.filter(r=>r.employee.status==='active'&&selectedDate>=r.employee.admission_date&&(!r.employee.employment_end||selectedDate<=r.employee.employment_end));
   const counts={active_employees:active.length,entered:active.filter(r=>r.day!.marks[0]!==null).length,not_entered:active.filter(r=>r.day!.expected_minutes>0&&r.day!.marks[0]===null).length,on_break:active.filter(r=>r.day!.status==='on_break').length,completed:active.filter(r=>r.day!.status==='completed').length,incomplete:rows.filter(r=>r.day!.incomplete).length,pending:reports.reduce((n,r)=>n+r.totals.pending_occurrences+r.days.filter(d=>d.overtime_pending_minutes>0).length,0),worked_minutes:reports.reduce((n,r)=>n+r.totals.worked_minutes,0)};
