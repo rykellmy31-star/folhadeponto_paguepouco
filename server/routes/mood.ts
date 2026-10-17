@@ -177,7 +177,8 @@ adminMoodRoutes.get('/mood', async c => {
     FROM employee_moods m
     JOIN employees e
       ON e.id = m.employee_id
-    WHERE m.mood_date >= ?
+    WHERE e.deleted_at IS NULL
+      AND m.mood_date >= ?
       AND m.mood_date < ?
     ORDER BY
       m.mood_date DESC,
