@@ -20,7 +20,7 @@
     }
   ],
   "vars": {
-    "ENVIRONMENT": "testing",
+    "ENVIRONMENT": "production",
     "APP_ORIGIN": "https://folhadeponto-paguepouco-teste.netssh3-0.workers.dev",
     "SESSION_HOURS": "8"
   },
