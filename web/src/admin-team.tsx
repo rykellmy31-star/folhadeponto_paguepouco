@@ -5,7 +5,7 @@ import {
   Users,LogIn,UserRoundX,Coffee,CheckCircle2,
   AlertTriangle,Clock3,MessageSquareText,Plus,Search,
   ArrowUpRight,RefreshCw,Eye,Pencil,KeyRound,Copy,
-  CalendarClock,UserRound,ShieldCheck,XCircle
+  CalendarClock,UserRound,ShieldCheck,XCircle,Trash2
 } from 'lucide-react';
 import {
   api,brDate,clock,errorMessage,hm,localInput,weekdayNames
@@ -331,6 +331,12 @@ export function EmployeesPage(){
   const [reset,setReset]=useState<any>(null);
   const [actionBusy,setActionBusy]=useState('');
 
+  // Exclusao logica: preserva todos os registros de ponto e historico.
+  const [deleteTarget,setDeleteTarget]=useState<any|null>(null);
+  const [deleteConfirm,setDeleteConfirm]=useState('');
+  const [deleteBusy,setDeleteBusy]=useState(false);
+  const [deleteError,setDeleteError]=useState<unknown>(null);
+
   const profile=useData(
     profileId?`/admin/employees/${profileId}`:null
   );
@@ -364,6 +370,40 @@ export function EmployeesPage(){
       }
     }finally{
       setActionBusy('');
+    }
+  };
+
+  const closeDelete=()=>{
+    if(deleteBusy)return;
+    setDeleteTarget(null);
+    setDeleteConfirm('');
+    setDeleteError(null);
+  };
+
+  const removeEmployee=async()=>{
+    if(!deleteTarget||deleteConfirm!=='EXCLUIR'||deleteBusy)return;
+
+    setDeleteBusy(true);
+    setDeleteError(null);
+
+    try{
+      await reauth();
+      const result=await api(
+        `/admin/employees/${deleteTarget.id}`,
+        'DELETE',
+        {confirmation:'EXCLUIR'}
+      );
+      setDeleteTarget(null);
+      setDeleteConfirm('');
+      setProfileId(null);
+      toast(result.message);
+      state.reload();
+    }catch(err){
+      if(errorMessage(err)!=='Operação cancelada.'){
+        setDeleteError(err);
+      }
+    }finally{
+      setDeleteBusy(false);
     }
   };
 
@@ -523,6 +563,21 @@ export function EmployeesPage(){
                           >
                             <KeyRound size={17}/>
                           </button>
+                          <button
+                            className="icon-btn"
+                            type="button"
+                            title="Excluir funcionário"
+                            aria-label={`Excluir ${e.full_name}`}
+                            style={{color:'#1f2937'}}
+                            disabled={deleteBusy}
+                            onClick={()=>{
+                              setDeleteTarget(e);
+                              setDeleteConfirm('');
+                              setDeleteError(null);
+                            }}
+                          >
+                            <Trash2 size={17}/>
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -532,6 +587,61 @@ export function EmployeesPage(){
             </div>
       }
     </section>
+
+    {deleteTarget&&
+      <Modal
+        title="Excluir funcionário?"
+        description="Confirme a remoção do cadastro da lista de funcionários."
+        onClose={closeDelete}
+      >
+        <Notice type="warning">
+          <strong>{deleteTarget.full_name}</strong>
+          <p>Matrícula: {deleteTarget.registration}</p>
+          <p>
+            Esta ação vai retirar o funcionário da lista principal e
+            bloquear seu acesso ao sistema. As marcações de ponto,
+            os relatórios e o histórico administrativo serão preservados.
+          </p>
+        </Notice>
+
+        <Field
+          label="Digite EXCLUIR para confirmar"
+          hint="Esta confirmação evita exclusões acidentais."
+        >
+          <input
+            type="text"
+            value={deleteConfirm}
+            onChange={e=>setDeleteConfirm(e.target.value)}
+            placeholder="EXCLUIR"
+            autoComplete="off"
+            disabled={deleteBusy}
+          />
+        </Field>
+
+        <InlineError error={deleteError}/>
+
+        <div className="modal-actions">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={deleteBusy}
+            onClick={closeDelete}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            variant="danger"
+            icon={Trash2}
+            disabled={deleteConfirm!=='EXCLUIR'||deleteBusy}
+            busy={deleteBusy}
+            onClick={removeEmployee}
+          >
+            Excluir funcionário
+          </Button>
+        </div>
+      </Modal>
+    }
 
     {edit!==false&&
       <EmployeeForm
