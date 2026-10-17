@@ -52,11 +52,28 @@ adminOperations.get('/records',async c=>{
     closure:r.closure
   })));
 });
+// Relatorios operacionais: funcionarios arquivados nao entram na lista nem
+// nos totais de horas da equipe. Os documentos historicos individuais
+// continuam disponiveis pelas rotas /reports/:id e /reports/:id/:format.
+const operationalReports = async (c: Ctx, m: string) => {
+  const archived = await c.get('db').prepare(
+    'SELECT id FROM employees WHERE deleted_at IS NOT NULL'
+  ).all<{id: string}>();
+  const archivedIds = new Set(archived.results.map(e => e.id));
+  const reports = await reportsForMonth(c, m);
+  return reports.filter(r => !archivedIds.has(r.employee.id));
+};
 adminOperations.get('/reports',async c=>{
-  const m=parse(month,c.req.query('month'));const reports=await reportsForMonth(c,m);return c.json(reports.map(({employee,totals,closure})=>({employee,totals,closure,month:m})));
+  const m=parse(month,c.req.query('month'));
+  const reports=await operationalReports(c,m);
+  return c.json(reports.map(({employee,totals,closure})=>({employee,totals,closure,month:m})));
 });
 adminOperations.get('/reports/general.csv',async c=>{
-  const m=parse(month,c.req.query('month')),reports=await reportsForMonth(c,m);c.header('Content-Type','text/csv; charset=utf-8');c.header('Content-Disposition',`attachment; filename="relatorio-geral-${m}.csv"`);return c.body(generalCsv(reports));
+  const m=parse(month,c.req.query('month'));
+  const reports=await operationalReports(c,m);
+  c.header('Content-Type','text/csv; charset=utf-8');
+  c.header('Content-Disposition',`attachment; filename="relatorio-geral-${m}.csv"`);
+  return c.body(generalCsv(reports));
 });
 adminOperations.get('/reports/:id',async c=>{
   const id=parse(uuid,c.req.param('id')),m=parse(month,c.req.query('month'));return c.json(await reportFor(c,id,m));
