@@ -5,8 +5,8 @@
 ALTER TABLE schedules
 ADD COLUMN deleted_at INTEGER DEFAULT NULL;
 
--- Nao permite excluir jornadas ja atribuidas.
--- Tambem impede reativar uma jornada excluida.
+-- Protege jornadas que ja foram atribuidas
+-- e impede restaurar jornadas excluidas logicamente.
 CREATE TRIGGER IF NOT EXISTS schedules_soft_delete_guard
 BEFORE UPDATE OF deleted_at ON schedules
 WHEN (

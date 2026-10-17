@@ -1,20 +1,41 @@
 import {createContext,useContext,useEffect,useState,type ReactNode} from 'react';
 import {Link,NavLink,Navigate,Outlet,useLocation,useNavigate} from 'react-router-dom';
-import {LayoutDashboard,Users,Clock3,FileSpreadsheet,MessageSquareText,CalendarClock,Settings2,ShieldCheck,ScrollText,LogOut,ChevronRight,Menu,X,BookOpen,Building2,UserRound,HelpCircle} from 'lucide-react';
+import {LayoutDashboard,Users,Clock3,FileSpreadsheet,MessageSquareText,CalendarClock,Settings2,ShieldCheck,ScrollText,LogOut,ChevronRight,Menu,X,BookOpen,Building2,UserRound,HelpCircle,HeartHandshake} from 'lucide-react';
 import {api,setCsrf,type Realm,clock,localInput,errorMessage} from './api';
 import {Brand} from './auth-pages';
 import {Button,Initials,SecurityProvider,Spinner,useToast} from './ui';
+
 type Session={user:{id:string;login:string;email:string;name:string;role:Realm;employee_id:string|null;must_change_password:boolean};csrf_token:string;server_now:number;expires_at:number};
 const SessionContext=createContext<{session:Session;realm:Realm;config:any}>({} as any);
 export const useSession=()=>useContext(SessionContext);
+
 export function useData<T=any>(path:string|null){
   const [data,setData]=useState<T|null>(null),[error,setError]=useState<unknown>(null),[loading,setLoading]=useState(!!path),[revision,setRevision]=useState(0);
   useEffect(()=>{let active=true;if(!path){setData(null);setLoading(false);return;}setLoading(true);setError(null);setData(null);api<T>(path).then(r=>{if(active)setData(r);}).catch(e=>{if(active)setError(e);}).finally(()=>{if(active)setLoading(false);});return()=>{active=false;};},[path,revision]);
   return {data,error,loading,reload:()=>setRevision(v=>v+1)};
 }
-const adminLinks=[{to:'/admin',label:'Visão geral',icon:LayoutDashboard,end:true},{to:'/admin/funcionarios',label:'Funcionários',icon:Users},{to:'/admin/registros',label:'Registros de ponto',icon:Clock3},{to:'/admin/relatorios',label:'Folhas e relatórios',icon:FileSpreadsheet},{to:'/admin/ocorrencias',label:'Ocorrências',icon:MessageSquareText},{to:'/admin/jornadas',label:'Jornadas e escalas',icon:CalendarClock}];
-const adminManage=[{to:'/admin/configuracoes',label:'Configurações',icon:Settings2},{to:'/admin/administradores',label:'Administradores',icon:ShieldCheck},{to:'/admin/auditoria',label:'Auditoria',icon:ScrollText}];
-const employeeLinks=[{to:'/app',label:'Registrar ponto',icon:Clock3,end:true},{to:'/app/folha',label:'Minha folha de ponto',icon:FileSpreadsheet},{to:'/app/solicitacoes',label:'Minhas solicitações',icon:MessageSquareText},{to:'/app/conta',label:'Minha conta',icon:UserRound}];
+
+const adminLinks=[
+  {to:'/admin',label:'Visão geral',icon:LayoutDashboard,end:true},
+  {to:'/admin/funcionarios',label:'Funcionários',icon:Users},
+  {to:'/admin/registros',label:'Registros de ponto',icon:Clock3},
+  {to:'/admin/relatorios',label:'Folhas e relatórios',icon:FileSpreadsheet},
+  {to:'/admin/ocorrencias',label:'Ocorrências',icon:MessageSquareText},
+  {to:'/admin/humor',label:'Humor da Equipe',icon:HeartHandshake},
+  {to:'/admin/jornadas',label:'Jornadas e escalas',icon:CalendarClock}
+];
+const adminManage=[
+  {to:'/admin/configuracoes',label:'Configurações',icon:Settings2},
+  {to:'/admin/administradores',label:'Administradores',icon:ShieldCheck},
+  {to:'/admin/auditoria',label:'Auditoria',icon:ScrollText}
+];
+const employeeLinks=[
+  {to:'/app',label:'Registrar ponto',icon:Clock3,end:true},
+  {to:'/app/folha',label:'Minha folha de ponto',icon:FileSpreadsheet},
+  {to:'/app/solicitacoes',label:'Minhas solicitações',icon:MessageSquareText},
+  {to:'/app/conta',label:'Minha conta',icon:UserRound}
+];
+
 export function ProtectedLayout({realm}:{realm:Realm}){
   const [session,setSession]=useState<Session|null>(null),[config,setConfig]=useState<any>(null),[loading,setLoading]=useState(true),[menu,setMenu]=useState(false),[logoutBusy,setLogoutBusy]=useState(false);
   const navigate=useNavigate(),location=useLocation(),toast=useToast(),base=realm==='admin'?'/admin':'/app';
@@ -32,6 +53,7 @@ export function ProtectedLayout({realm}:{realm:Realm}){
   const logout=async()=>{setLogoutBusy(true);try{await api(`/auth/${realm}/logout`,'POST',{});navigate(realm==='admin'?'/admin/entrar':'/entrar',{replace:true});}catch(e){toast(errorMessage(e),'error');}finally{setLogoutBusy(false);}};
   return <SessionContext.Provider value={{session,realm,config}}><SecurityProvider realm={realm}><div className="app-shell">{menu&&<button className="nav-scrim" onClick={()=>setMenu(false)} aria-label="Fechar menu"/>}<aside className={'sidebar '+(menu?'sidebar-open':'')}><div className="sidebar-brand"><Link to={base}><Brand/></Link><button className="icon-btn mobile-only" onClick={()=>setMenu(false)} aria-label="Fechar menu"><X size={20}/></button></div><div className="portal-label">{realm==='admin'?'PAINEL ADMINISTRATIVO':'PORTAL DO FUNCIONÁRIO'}</div><nav aria-label="Menu principal">{links.map(({to,label,icon:Icon,end})=><NavLink key={to} to={to} end={end} className={({isActive})=>'nav-link '+(isActive?'active':'')}><Icon size={19}/><span>{label}</span></NavLink>)}{realm==='admin'&&<><div className="nav-section">GERENCIAMENTO</div>{adminManage.map(({to,label,icon:Icon})=><NavLink key={to} to={to} className={({isActive})=>'nav-link '+(isActive?'active':'')}><Icon size={18}/><span>{label}</span></NavLink>)}</>}</nav><div className="sidebar-bottom"><Link to={base+'/ajuda'} className="help-card"><div><BookOpen size={19}/><strong>Uma jornada mais simples</strong></div><p>Consulte o guia de uso do sistema.</p><span>Abrir guia <ChevronRight size={14}/></span></Link><Link to={account} className="sidebar-user"><Initials name={session.user.name}/><div><strong>{session.user.name}</strong><span>{realm==='admin'?'Administrador':'Funcionário'}</span></div><ChevronRight size={16}/></Link><button className="logout-btn" onClick={logout} disabled={logoutBusy}><LogOut size={17}/>{logoutBusy?'Encerrando…':'Sair da conta'}</button></div></aside><div className="app-main"><header className="topbar"><div className="topbar-left"><button className="icon-btn mobile-only" onClick={()=>setMenu(true)} aria-label="Abrir menu"><Menu size={22}/></button><div className="breadcrumb"><Building2 size={16}/><span>{config?.company_name||'Empresa'}</span><ChevronRight size={13}/><strong>{title}</strong></div></div><div className="topbar-right">{config?.environment!=='production'&&<span className="environment-chip">{config?.environment==='test'?'TESTES':'DESENVOLVIMENTO'}</span>}<span className="topbar-date">{dateStr}</span><Link className="icon-btn" to={base+'/ajuda'} aria-label="Ajuda"><HelpCircle size={19}/></Link></div></header><main className="page-content"><Outlet/></main><footer className="app-footer"><span>jornada. <span>Gestão de tempo com confiança.</span></span><span><ShieldCheck size={13}/>{config?.environment==='production'?'Acesso autenticado · Cloudflare D1':'D1 local persistente · não publicado'}</span></footer></div></div></SecurityProvider></SessionContext.Provider>;
 }
+
 export function HelpPage(){const {realm}=useSession();return <div className="help-page"><div className="eyebrow">CENTRAL DE AJUDA</div><h1>Sua jornada, sem complicação.</h1><p className="muted">Instruções práticas para usar o sistema com segurança.</p><div className="help-grid">{(realm==='admin'?[
 ['1. Prepare a empresa','Em Configurações, confira o nome da empresa, o fuso horário e as tolerâncias. Cadastre os feriados. Regras novas têm vigência própria; dias iniciados preservam suas regras.'],
 ['2. Cadastre uma jornada','Em Jornadas e escalas, crie os horários e dias trabalhados. Para turnos noturnos, informe a saída menor que a entrada; ela será interpretada no dia seguinte.'],

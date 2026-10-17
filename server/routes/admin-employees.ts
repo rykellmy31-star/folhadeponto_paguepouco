@@ -44,6 +44,7 @@ adminEmployees.get('/employees', async c => {
       ) schedule_name
     FROM employees e
     JOIN users u ON u.employee_id=e.id
+    WHERE e.deleted_at IS NULL
     ORDER BY e.full_name
   `).bind(today).all<any>();
 
@@ -67,7 +68,7 @@ adminEmployees.post('/employees', async c => {
   const userId=crypto.randomUUID();
 
   const exists=await db.prepare(
-    'SELECT id FROM schedules WHERE id=? AND archived=0'
+    'SELECT id FROM schedules WHERE id=? AND archived=0 AND deleted_at IS NULL'
   ).bind(input.schedule_id).first();
 
   ensure(
@@ -157,7 +158,7 @@ adminEmployees.get('/employees/:id',async c=>{
            u.must_change_password
     FROM employees e
     JOIN users u ON u.employee_id=e.id
-    WHERE e.id=?
+    WHERE e.id=? AND e.deleted_at IS NULL
   `).bind(id).first<any>();
 
   ensure(
@@ -212,7 +213,7 @@ adminEmployees.put('/employees/:id',async c=>{
     SELECT e.*,u.id user_id,u.login,u.email
     FROM employees e
     JOIN users u ON u.employee_id=e.id
-    WHERE e.id=?
+    WHERE e.id=? AND e.deleted_at IS NULL
   `).bind(id).first<any>();
 
   ensure(
@@ -333,6 +334,77 @@ adminEmployees.put('/employees/:id',async c=>{
   return c.json({message:'Cadastro atualizado.'});
 });
 
+
+// Remocao administrativa segura. O funcionario deixa a lista e perde acesso,
+// mas marcacoes, historico, atribuicoes e auditoria sao preservados.
+adminEmployees.delete('/employees/:id', async c => {
+  requireRecent(c);
+  const id = parse(uuid, c.req.param('id'));
+  await body(c, z.object({confirmation:z.literal('EXCLUIR')}).strict());
+
+  const db = c.get('db');
+  const employee = await db.prepare(`
+    SELECT e.id,e.full_name,e.registration,e.status,
+           e.admission_date,e.employment_end,
+           u.id AS user_id
+    FROM employees e
+    JOIN users u ON u.employee_id=e.id AND u.role='employee'
+    WHERE e.id=? AND e.deleted_at IS NULL
+  `).bind(id).first<{
+    id:string;
+    full_name:string;
+    registration:string;
+    status:string;
+    admission_date:string;
+    employment_end:string|null;
+    user_id:string;
+  }>();
+
+  ensure(employee,404,'employee_not_found',
+    'Funcionario nao encontrado ou ja excluido.');
+
+  const settings = await db.prepare(
+    'SELECT timezone FROM settings WHERE id=1'
+  ).first<{timezone:string}>();
+  ensure(settings,503,'settings_unavailable','Configuracoes indisponiveis.');
+
+  const now = Date.now();
+  const today = localDate(now, settings.timezone);
+  const employmentEnd = employee.employment_end ??
+    (employee.admission_date > today ? employee.admission_date : today);
+
+  await db.batch([
+    db.prepare(`
+      UPDATE employees
+      SET status='terminated',employment_end=?,
+          deleted_at=?,deleted_by=?,updated_at=?
+      WHERE id=? AND deleted_at IS NULL
+    `).bind(employmentEnd,now,c.get('principal').id,now,id),
+
+    db.prepare(`
+      UPDATE users SET active=0,updated_at=? WHERE id=?
+    `).bind(now,employee.user_id),
+
+    db.prepare('DELETE FROM sessions WHERE user_id=?')
+      .bind(employee.user_id),
+
+    db.prepare('DELETE FROM password_reset_tokens WHERE user_id=?')
+      .bind(employee.user_id),
+
+    auditStatement(c,'employee.deleted','employee',id,{
+      full_name:employee.full_name,
+      registration:employee.registration,
+      previous_status:employee.status,
+      archived_at:now,
+      history_preserved:true
+    })
+  ]);
+
+  return c.json({
+    message:'Funcionario excluido da lista. Acesso bloqueado e historico preservado.'
+  });
+});
+
 adminEmployees.post('/employees/:id/schedule',async c=>{
   requireRecent(c);
 
@@ -360,11 +432,11 @@ adminEmployees.post('/employees/:id/schedule',async c=>{
   );
 
   const employee=await db.prepare(
-    'SELECT id FROM employees WHERE id=?'
+    'SELECT id FROM employees WHERE id=? AND deleted_at IS NULL'
   ).bind(id).first();
 
   const schedule=await db.prepare(
-    'SELECT id FROM schedules WHERE id=? AND archived=0'
+    'SELECT id FROM schedules WHERE id=? AND archived=0 AND deleted_at IS NULL'
   ).bind(input.schedule_id).first();
 
   ensure(
@@ -373,17 +445,18 @@ adminEmployees.post('/employees/:id/schedule',async c=>{
     'Funcionário ou jornada não encontrado.'
   );
 
-  // A restrição UNIQUE do banco também protege datas
-  // que tiveram uma atribuição cancelada.
+  // Considera conflito apenas quando ja existe atribuicao ativa.
+  // A atribuicao cancelada permanece no historico.
   const conflict=await db.prepare(`
-    SELECT id FROM schedule_assignments
-    WHERE employee_id=? AND effective_from=?
+    SELECT a.id FROM schedule_assignments a
+    WHERE a.employee_id=? AND a.effective_from=?
+      AND ${notCancelled('a')}
     LIMIT 1
   `).bind(id,input.effective_from).first();
 
   ensure(
     !conflict,409,'schedule_date_conflict',
-    'Esta data já possui ou já possuiu uma atribuição. Escolha outra data.'
+    'Este funcionario ja possui uma jornada ativa nesta data.'
   );
 
   await db.batch([
@@ -497,7 +570,7 @@ adminEmployees.post(
 
 adminEmployees.get('/schedules',async c=>{
   const rows=await c.get('db').prepare(
-    'SELECT * FROM schedules ORDER BY created_at DESC'
+    'SELECT * FROM schedules WHERE deleted_at IS NULL ORDER BY created_at DESC'
   ).all<any>();
 
   return c.json(rows.results.map(v=>{
@@ -544,8 +617,108 @@ adminEmployees.post('/schedules',async c=>{
 
   return c.json({
     id,
-    message:'Jornada criada. Para alterar uma jornada em uso, crie outra versão e atribua uma nova vigência.'
+    message:'Jornada criada com sucesso.'
   },201);
+});
+
+// Atualiza uma jornada existente mantendo seu ID e atribuicoes.
+// O historico e registrado para vigorar a partir do dia seguinte.
+adminEmployees.patch('/schedules/:id', async c => {
+  requireRecent(c);
+
+  const id = parse(uuid, c.req.param('id'));
+  const input = await body(
+    c,
+    z.object({
+      name: z.string().trim().min(2).max(100),
+      config: scheduleSchema
+    }).strict()
+  );
+
+  const db = c.get('db');
+  const current = await db.prepare(`
+    SELECT id, name, config_json, archived, deleted_at
+    FROM schedules
+    WHERE id = ?
+  `).bind(id).first<{
+    id: string;
+    name: string;
+    config_json: string;
+    archived: number;
+    deleted_at: number | null;
+  }>();
+
+  ensure(
+    current, 404, 'schedule_not_found',
+    'Jornada nao encontrada.'
+  );
+  ensure(
+    current.deleted_at === null, 404, 'schedule_not_found',
+    'Jornada excluida nao pode ser editada.'
+  );
+  ensure(
+    !current.archived, 409, 'schedule_archived',
+    'Restaure a jornada antes de edita-la.'
+  );
+
+  const settings = await db.prepare(
+    'SELECT timezone FROM settings WHERE id=1'
+  ).first<{timezone:string}>();
+
+  const now = Date.now();
+  // Soma um dia civil a data local, sem depender do fuso horario UTC.
+  const today = localDate(now, settings!.timezone);
+  const tomorrow = new Date(`${today}T12:00:00.000Z`);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  const effectiveFrom = tomorrow.toISOString().slice(0, 10);
+
+  const nextConfig = JSON.stringify(input.config);
+  const oldConfig = JSON.parse(current.config_json);
+
+  if (
+    current.name === input.name &&
+    JSON.stringify(oldConfig) === nextConfig
+  ) {
+    return c.json({
+      id,
+      message: 'Nenhuma alteracao necessaria.'
+    });
+  }
+
+  await db.batch([
+    db.prepare(`
+      UPDATE schedules
+      SET name=?, config_json=?
+      WHERE id=?
+    `).bind(input.name, nextConfig, id),
+
+    db.prepare(`
+      INSERT INTO schedule_history(
+        schedule_id, effective_from, name, config_json,
+        changed_by, created_at
+      ) VALUES(?,?,?,?,?,?)
+    `).bind(
+      id, effectiveFrom, input.name, nextConfig,
+      c.get('principal').id, now
+    ),
+
+    auditStatement(
+      c, 'schedule.updated', 'schedule', id,
+      {
+        effective_from: effectiveFrom,
+        old_name: current.name,
+        new_name: input.name,
+        old_config: oldConfig,
+        new_config: input.config
+      }
+    )
+  ]);
+
+  return c.json({
+    id,
+    effective_from: effectiveFrom,
+    message: 'Jornada atualizada. Os novos horarios valem a partir de amanha.'
+  });
 });
 
 adminEmployees.post('/schedules/:id/replace',async c=>{
@@ -577,15 +750,22 @@ adminEmployees.post('/schedules/:id/replace',async c=>{
   );
 
   const original=await db.prepare(
-    'SELECT id,archived FROM schedules WHERE id=?'
+    'SELECT id,archived,deleted_at FROM schedules WHERE id=?'
   ).bind(oldId).first<{
     id:string;
     archived:number;
+    deleted_at:number|null;
   }>();
 
   ensure(
     original,404,'schedule_not_found',
     'Escala original não encontrada.'
+  );
+
+  ensure(
+    original.deleted_at === null,
+    404,'schedule_not_found',
+    'Jornada excluida nao pode ser substituida.'
   );
 
   ensure(
@@ -616,9 +796,10 @@ adminEmployees.post('/schedules/:id/replace',async c=>{
 
   for(const employee of employees){
     const conflict=await db.prepare(`
-      SELECT id FROM schedule_assignments
-      WHERE employee_id=?
-        AND effective_from=?
+      SELECT a.id FROM schedule_assignments a
+      WHERE a.employee_id=?
+        AND a.effective_from=?
+        AND ${notCancelled('a')}
       LIMIT 1
     `).bind(
       employee.employee_id,input.effective_from
@@ -627,7 +808,7 @@ adminEmployees.post('/schedules/:id/replace',async c=>{
     ensure(
       !conflict,
       409,'schedule_date_conflict',
-      'Um funcionário já possui ou já possuiu uma atribuição nesta data. Escolha outra data.'
+      'Este funcionario ja possui uma jornada ativa nesta data.'
     );
   }
 
@@ -689,16 +870,21 @@ adminEmployees.patch('/schedules/:id/archive',async c=>{
   const db=c.get('db');
 
   const schedule=await db.prepare(
-    'SELECT id,name,archived FROM schedules WHERE id=?'
+    'SELECT id,name,archived,deleted_at FROM schedules WHERE id=?'
   ).bind(id).first<{
     id:string;
     name:string;
     archived:number;
+    deleted_at:number|null;
   }>();
 
   ensure(
     schedule,404,'schedule_not_found',
     'Escala não encontrada.'
+  );
+  ensure(
+    schedule.deleted_at === null,404,'schedule_not_found',
+    'Jornada excluida nao pode ser arquivada ou restaurada.'
   );
 
   if(input.archived){
@@ -777,15 +963,17 @@ adminEmployees.delete('/schedules/:id',async c=>{
   const db=c.get('db');
 
   const existing=await db.prepare(
-    'SELECT id,name FROM schedules WHERE id=?'
+    'SELECT id,name,deleted_at FROM schedules WHERE id=?'
   ).bind(id).first<{
     id:string;
     name:string;
+    deleted_at:number|null;
   }>();
 
   ensure(
-    existing,404,'schedule_not_found',
-    'Escala não encontrada.'
+    existing && existing.deleted_at === null,
+    404,'schedule_not_found',
+    'Jornada nao encontrada ou ja excluida.'
   );
 
   const assigned=await db.prepare(`
@@ -798,27 +986,32 @@ adminEmployees.delete('/schedules/:id',async c=>{
   ensure(
     !assigned,
     409,'schedule_in_use',
-    'Esta escala já foi atribuída a um funcionário e não pode ser excluída, pois faz parte do histórico do ponto.'
+    'Esta jornada ja foi atribuida a um funcionario e nao pode ser excluida, pois faz parte do historico.'
   );
 
+  // Exclusao logica: nunca apaga o historico nem a linha de schedules.
+  // O gatilho do banco rejeita a exclusao se houver atribuicoes.
+  const now=Date.now();
   await db.batch([
     db.prepare(`
-      DELETE FROM schedules
+      UPDATE schedules
+      SET deleted_at=?, archived=1
       WHERE id=?
+        AND deleted_at IS NULL
         AND NOT EXISTS(
           SELECT 1 FROM schedule_assignments
           WHERE schedule_id=?
         )
-    `).bind(id,id),
+    `).bind(now,id,id),
 
     auditStatement(
       c,'schedule.deleted','schedule',id,
-      {name:existing.name}
+      {name:existing.name,deleted_at:now,mode:'soft_delete'}
     )
   ]);
 
   return c.json({
-    message:'Escala excluída com auditoria.'
+    message:'Jornada removida do painel. Historico preservado.'
   });
 });
 

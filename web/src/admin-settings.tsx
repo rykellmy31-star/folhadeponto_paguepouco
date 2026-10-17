@@ -78,7 +78,7 @@ export function SchedulesPage(){
     <PageHeader
       eyebrow="JORNADA CONTRATUAL"
       title="Jornadas e escalas"
-      description="Gerencie horários, versões e escalas arquivadas."
+      description="Edite as jornadas existentes e gerencie escalas arquivadas."
       actions={
         <Button icon={Plus} onClick={()=>setEdit({})}>
           Nova jornada
@@ -87,9 +87,9 @@ export function SchedulesPage(){
     />
 
     <Notice>
-      Escalas antigas podem ser arquivadas sem apagar o histórico
-      de ponto. A exclusão definitiva continua restrita às escalas
-      nunca atribuídas.
+      Você pode editar os horários de uma jornada mesmo depois de atribuí-la.
+      As alterações passam a valer no dia seguinte, preservando os dias anteriores.
+      A exclusão de jornadas já utilizadas permanece restrita.
     </Notice>
 
     <div className="action-row">
@@ -129,7 +129,7 @@ export function SchedulesPage(){
                  <CalendarClock size={23}/>
                </div>
                <Badge>
-                 {s.archived?'Arquivada':'Versão preservada'}
+                 {s.archived?'Arquivada':'Jornada ativa'}
                </Badge>
              </div>
 
@@ -234,15 +234,8 @@ function ScheduleModal({
   onClose:()=>void;
   onSaved:()=>void;
 }){
-  const {config:publicConfig}=useSession();
   const {reauth}=useSecurity();
   const toast=useToast();
-
-  const [effective,setEffective]=useState(()=>{
-    const d=new Date(publicConfig.server_now);
-    d.setUTCDate(d.getUTCDate()+1);
-    return localInput(d.getTime(),publicConfig.timezone).slice(0,10);
-  });
 
   const [name,setName]=useState(initial.name||'');
   const [config,setConfig]=useState(initial.config||{
@@ -272,10 +265,10 @@ function ScheduleModal({
       offset(config.break_end)-offset(config.break_start));
 
   return <Modal
-    title={initial.sourceId?'Editar escala para todos':'Nova versão de jornada'}
+    title={initial.sourceId?'Editar jornada':'Nova jornada'}
     description={initial.sourceId
-      ?'Cria uma nova versão e atribui automaticamente aos funcionários que usam a escala na data escolhida. O histórico é preservado.'
-      :'Cria uma versão independente, sem atribuir automaticamente aos funcionários.'}
+      ?'Atualiza esta jornada sem criar duplicatas. Os funcionários vinculados permanecem, e os novos horários valem a partir de amanhã. Os dias anteriores são preservados.'
+      :'Cadastre uma nova jornada. Ela poderá ser atribuída aos funcionários depois de criada.'}
     onClose={onClose}
   >
     <form onSubmit={async e=>{
@@ -287,9 +280,9 @@ function ScheduleModal({
         if(initial.sourceId){
           await reauth();
           const result=await api(
-            `/admin/schedules/${initial.sourceId}/replace`,
-            'POST',
-            {name,config,effective_from:effective}
+            `/admin/schedules/${initial.sourceId}`,
+            'PATCH',
+            {name,config}
           );
           toast(result.message);
         }else{
@@ -366,21 +359,6 @@ function ScheduleModal({
         Intervalo remunerado
       </label>
 
-      {initial.sourceId&&
-        <Field label="Novos horários válidos a partir de">
-          <input
-            type="date"
-            min={localInput(
-              publicConfig.server_now,
-              publicConfig.timezone
-            ).slice(0,10)}
-            value={effective}
-            onChange={e=>setEffective(e.target.value)}
-            required
-          />
-        </Field>
-      }
-
       <div className="schedule-preview">
         <strong>
           Carga calculada: {daily>0?hm(daily):'—'} h/dia
@@ -407,7 +385,7 @@ function ScheduleModal({
         </Button>
         <Button busy={busy}>
           {initial.sourceId
-            ?'Salvar e atualizar funcionários'
+            ?'Salvar alterações'
             :'Criar jornada'}
         </Button>
       </div>
