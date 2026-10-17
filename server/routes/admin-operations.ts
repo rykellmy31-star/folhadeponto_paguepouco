@@ -14,8 +14,28 @@ const settings=(c:Ctx)=>c.get('db').prepare('SELECT * FROM settings WHERE id=1')
 adminOperations.get('/dashboard',async c=>{
   const config=await settings(c),selectedDate=parse(date,c.req.query('date')||localDate(Date.now(),config!.timezone));
   const selectedMonth=parse(month,c.req.query('month')||selectedDate.slice(0,7));
-  const reports=await reportsForMonth(c,selectedMonth);
-  const dateReports=selectedDate.slice(0,7)===selectedMonth?reports:await reportsForMonth(c,selectedDate.slice(0,7));
+  // Contas de demonstracao arquivadas nao devem inflar os indicadores.
+  // Ex-funcionarios reais continuam incluidos nos totais historicos.
+  // Os registros individuais permanecem preservados nos relatorios.
+  const demos=await c.get('db').prepare(`
+    SELECT DISTINCT e.id
+    FROM employees e
+    LEFT JOIN users u ON u.employee_id=e.id AND u.role='employee'
+    WHERE e.deleted_at IS NOT NULL
+      AND (
+        LOWER(e.full_name) LIKE '%demonstra%'
+        OR LOWER(e.full_name) LIKE '%funcionario teste%'
+        OR LOWER(e.registration) LIKE '%demo%'
+        OR LOWER(u.login) LIKE '%demo%'
+      )
+  `).all<{id:string}>();
+  const demoIds=new Set(demos.results.map(e=>e.id));
+  const visibleReports=(items:Awaited<ReturnType<typeof reportsForMonth>>)=>
+    items.filter(r=>!demoIds.has(r.employee.id));
+  const reports=visibleReports(await reportsForMonth(c,selectedMonth));
+  const dateReports=selectedDate.slice(0,7)===selectedMonth
+    ?reports
+    :visibleReports(await reportsForMonth(c,selectedDate.slice(0,7)));
   const rows=dateReports.map(r=>({employee:r.employee,day:r.days.find(d=>d.date===selectedDate)}));
   const active=rows.filter(r=>r.employee.status==='active'&&selectedDate>=r.employee.admission_date&&(!r.employee.employment_end||selectedDate<=r.employee.employment_end));
   const counts={active_employees:active.length,entered:active.filter(r=>r.day!.marks[0]!==null).length,not_entered:active.filter(r=>r.day!.expected_minutes>0&&r.day!.marks[0]===null).length,on_break:active.filter(r=>r.day!.status==='on_break').length,completed:active.filter(r=>r.day!.status==='completed').length,incomplete:rows.filter(r=>r.day!.incomplete).length,pending:reports.reduce((n,r)=>n+r.totals.pending_occurrences+r.days.filter(d=>d.overtime_pending_minutes>0).length,0),worked_minutes:reports.reduce((n,r)=>n+r.totals.worked_minutes,0)};
